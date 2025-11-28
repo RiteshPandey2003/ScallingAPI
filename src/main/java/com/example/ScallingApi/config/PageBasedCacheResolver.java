@@ -1,67 +1,60 @@
 package com.example.ScallingApi.config;
 
 import com.example.ScallingApi.util.PaginationRequest;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.interceptor.CacheOperationInvocationContext;
 import org.springframework.cache.interceptor.CacheResolver;
-import org.springframework.data.redis.cache.RedisCacheConfiguration;
-import org.springframework.data.redis.cache.RedisCacheManager;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
-import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.stereotype.Component;
 
-
-
-
-
-import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
 
-@Component
+@Component("pageBasedCacheResolver")
 public class PageBasedCacheResolver implements CacheResolver {
 
-    @Autowired
-    private RedisConnectionFactory connectionFactory;
+    private final CacheManager cacheManager;
 
+    @Autowired
+    public PageBasedCacheResolver(CacheManager cacheManager) {
+        this.cacheManager = cacheManager;
+    }
+
+    /**
+     * Map incoming invocation to one of the predefined caches:
+     * - page == 0 -> users-page-0
+     * - page == 1 -> users-page-1
+     * - page >= 2 -> users-page-rest
+     *
+     * This avoids creating infinite cache names and keeps predictable TTLs.
+     */
     @Override
     public Collection<? extends Cache> resolveCaches(CacheOperationInvocationContext<?> context) {
 
-        Object[] params = context.getArgs();
+        Object[] args = context.getArgs();
 
-        // ✔ Your controller: getAllUsers(PaginationRequest request)
+        // Safe extraction: expects single argument PaginationRequest
+        if (args == null || args.length == 0 || args[0] == null) {
+            Cache c = cacheManager.getCache(RedisConfig.PAGE_REST_CACHE);
+            return Collections.singleton(c);
+        }
 
-        PaginationRequest request = (PaginationRequest) params[0];
+        if (!(args[0] instanceof PaginationRequest)) {
+            // fallback — use rest cache
+            Cache c = cacheManager.getCache(RedisConfig.PAGE_REST_CACHE);
+            return Collections.singleton(c);
+        }
 
-        int page = request.getPage(); // Extract page safely
+        PaginationRequest request = (PaginationRequest) args[0];
+        int page = request.getPage() == null ? 0 : request.getPage();
 
-        Duration ttl;
+        String cacheName;
+        if (page == 0) cacheName = RedisConfig.PAGE_0_CACHE;
+        else if (page == 1) cacheName = RedisConfig.PAGE_1_CACHE;
+        else cacheName = RedisConfig.PAGE_REST_CACHE;
 
-        // ✔ TTL rules
-        if (page == 0) ttl = Duration.ofSeconds(30);
-        else if (page == 1) ttl = Duration.ofMinutes(1);
-        else ttl = Duration.ofMinutes(10);
-
-        String cacheName = "users-page-" + page;
-
-        // ✔ Build per-page TTL cache configuration
-        RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
-                .entryTtl(ttl)
-                .serializeValuesWith(
-                        RedisSerializationContext.SerializationPair
-                                .fromSerializer(new GenericJackson2JsonRedisSerializer())
-                );
-
-        // ✔ Create cache manager only for this cache (allowed)
-        RedisCacheManager manager = RedisCacheManager
-                .builder(connectionFactory)
-                .cacheDefaults(config)
-                .build();
-
-        // ✔ Return specific page cache only
-        return Collections.singleton(manager.getCache(cacheName));
+        Cache cache = cacheManager.getCache(cacheName);
+        return Collections.singleton(cache);
     }
 }

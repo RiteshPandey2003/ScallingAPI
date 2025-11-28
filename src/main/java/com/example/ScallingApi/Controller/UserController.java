@@ -6,6 +6,7 @@ import com.example.ScallingApi.util.PaginationRequest;
 import com.example.ScallingApi.util.PagingResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,6 +21,15 @@ public class UserController {
     @Autowired
     UserService userService;
 
+    @Autowired
+    private RedisConnectionFactory factory;  // field injection or constructor injection in config/service
+
+    @GetMapping("/test")
+    public String test() {
+        var conn = factory.getConnection();
+        return conn.ping();
+    }
+
     @GetMapping("/users")
     public ResponseEntity<PagingResult<User>> getAllUsers(
             @RequestParam(defaultValue = "1") Integer page,
@@ -31,5 +41,9 @@ public class UserController {
         PagingResult<User> result = userService.getAllUsers(request);
         return ResponseEntity.ok(result);
     }
+
+
+
+
 
 }
